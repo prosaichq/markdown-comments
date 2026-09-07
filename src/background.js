@@ -180,7 +180,13 @@ const handlers = {
     if (etag) fileETags.set(key, etag);
     else fileETags.delete(key);
 
-    return { text: decodeBase64(data.content), sha: data.sha };
+    // The ref matters when none was asked for: the API then answers from the
+    // default branch, and the caller has no other way to learn its name.
+    return {
+      text: decodeBase64(data.content),
+      sha: data.sha,
+      ref: request.ref || refFromContentURLs(data, request.owner, request.repo)
+    };
   },
 
   /**
@@ -254,6 +260,51 @@ const handlers = {
       path: data.path,
       ref: request.ref || refFromContentURLs(data, request.owner, request.repo)
     };
+  },
+
+  /**
+   * Finds a branch a commit is actually on, so a page opened at a SHA can
+   * point somewhere writable. Branches whose head is this commit come first:
+   * what they hold is exactly what is on screen. A pull request's head branch
+   * is next, since a SHA URL usually arrives from a review, and the head
+   * branch may live in a fork, which is why the repository is reported back
+   * rather than assumed.
+   */
+  async branchForCommit(request) {
+    const commit = '/repos/' + request.owner + '/' + request.repo +
+                   '/commits/' + encodeURIComponent(request.sha);
+
+    try {
+      const heads = await callAPI(commit + '/branches-where-head');
+      if (Array.isArray(heads) && heads.length && heads[0].name) {
+        return {
+          owner: request.owner,
+          repo: request.repo,
+          branch: heads[0].name,
+          // The branch head is this commit, so the file is the one being read.
+          sameContent: true
+        };
+      }
+    } catch (error) { /* try the pull requests instead */ }
+
+    try {
+      const pulls = await callAPI(commit + '/pulls');
+      const list = Array.isArray(pulls) ? pulls : [];
+      const pick = list.find(function (pull) { return pull.state === 'open'; }) || list[0];
+      const head = pick && pick.head;
+      if (head && head.ref && head.repo && head.repo.owner) {
+        return {
+          owner: head.repo.owner.login,
+          repo: head.repo.name,
+          branch: head.ref,
+          // The branch has moved on since this commit; the caller checks the
+          // file is still there before offering it.
+          sameContent: false
+        };
+      }
+    } catch (error) { /* no branch to offer */ }
+
+    return null;
   },
 
   async getUser() {

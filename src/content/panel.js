@@ -226,7 +226,7 @@ const MDCPanel = (function () {
         state.canWrite
           ? 'No comments on ' + (state.location ? state.location.path : 'this file') +
             ' yet.\n\nSelect some text in the document and a Comment button will appear.'
-          : 'No comments yet. Add a token in the extension options to post one.'));
+          : 'No comments yet. ' + (state.readOnlyMessage || 'Add a token in the extension options to post one.')));
     }
 
     restoreFocus(focus);
@@ -314,6 +314,18 @@ const MDCPanel = (function () {
         return;
       }
 
+      // A commit SHA is not something Options can fix; the way out is the
+      // branch, so offer that here too rather than only in the quiet banner.
+      if (state.readOnlyLink) {
+        const branch = document.createElement('a');
+        branch.textContent = state.readOnlyLink.text;
+        branch.href = state.readOnlyLink.href;
+        branch.target = '_blank';
+        branch.rel = 'noopener noreferrer';
+        bannerEl.appendChild(branch);
+        return;
+      }
+
       if (handlers.onOpenOptions) {
         const options = document.createElement('a');
         options.textContent = 'Options';
@@ -338,14 +350,31 @@ const MDCPanel = (function () {
     if (!state.canWrite) {
       bannerEl.hidden = false;
       bannerEl.classList.add('mdc-info');
-      bannerEl.appendChild(document.createTextNode('Read only. '));
-      const link = document.createElement('a');
-      link.textContent = 'Add a token';
-      link.addEventListener('click', function () {
-        if (handlers.onOpenOptions) handlers.onOpenOptions();
-      });
-      bannerEl.appendChild(link);
-      bannerEl.appendChild(document.createTextNode(' to post comments.'));
+      // The reason varies (no token, a rejected token, or just viewing a
+      // commit SHA instead of a branch) and used to be papered over with a
+      // single "add a token" message even when a token was already saved.
+      bannerEl.appendChild(document.createTextNode(state.readOnlyMessage || 'Read only.'));
+
+      if (state.readOnlyAction === 'addToken' || state.readOnlyAction === 'options') {
+        bannerEl.appendChild(document.createTextNode(' '));
+        const link = document.createElement('a');
+        link.textContent = state.readOnlyAction === 'addToken' ? 'Add a token' : 'Options';
+        link.addEventListener('click', function () {
+          if (handlers.onOpenOptions) handlers.onOpenOptions();
+        });
+        bannerEl.appendChild(link);
+      }
+
+      // Somewhere else to go, rather than an instruction to find it yourself.
+      if (state.readOnlyAction === 'link' && state.readOnlyLink) {
+        bannerEl.appendChild(document.createTextNode(' '));
+        const link = document.createElement('a');
+        link.textContent = state.readOnlyLink.text;
+        link.href = state.readOnlyLink.href;
+        link.target = '_blank';
+        link.rel = 'noopener noreferrer';
+        bannerEl.appendChild(link);
+      }
     }
   }
 
