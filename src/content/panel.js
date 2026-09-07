@@ -226,7 +226,7 @@ const MDCPanel = (function () {
         state.canWrite
           ? 'No comments on ' + (state.location ? state.location.path : 'this file') +
             ' yet.\n\nSelect some text in the document and a Comment button will appear.'
-          : 'No comments yet. Add a token in the extension options to post one.'));
+          : 'No comments yet. ' + (state.readOnlyMessage || 'Add a token in the extension options to post one.')));
     }
 
     restoreFocus(focus);
@@ -338,14 +338,20 @@ const MDCPanel = (function () {
     if (!state.canWrite) {
       bannerEl.hidden = false;
       bannerEl.classList.add('mdc-info');
-      bannerEl.appendChild(document.createTextNode('Read only. '));
-      const link = document.createElement('a');
-      link.textContent = 'Add a token';
-      link.addEventListener('click', function () {
-        if (handlers.onOpenOptions) handlers.onOpenOptions();
-      });
-      bannerEl.appendChild(link);
-      bannerEl.appendChild(document.createTextNode(' to post comments.'));
+      // The reason varies (no token, a rejected token, or just viewing a
+      // commit SHA instead of a branch) and used to be papered over with a
+      // single "add a token" message even when a token was already saved.
+      bannerEl.appendChild(document.createTextNode(state.readOnlyMessage || 'Read only.'));
+
+      if (state.readOnlyAction === 'addToken' || state.readOnlyAction === 'options') {
+        bannerEl.appendChild(document.createTextNode(' '));
+        const link = document.createElement('a');
+        link.textContent = state.readOnlyAction === 'addToken' ? 'Add a token' : 'Options';
+        link.addEventListener('click', function () {
+          if (handlers.onOpenOptions) handlers.onOpenOptions();
+        });
+        bannerEl.appendChild(link);
+      }
     }
   }
 

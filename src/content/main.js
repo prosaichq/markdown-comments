@@ -12,6 +12,39 @@
   const MARKDOWN_PATH = /\.(md|markdown|mdown|mkd)$/i;
   const SHA_REF = /^[0-9a-f]{40}$/i;
 
+  /**
+   * Explains why writing is unavailable, and what (if anything) fixes it.
+   * Shared by the persistent banner and the moment someone tries to actually
+   * write a comment, so the two cannot say different things about the same
+   * state. "No token" is one of several reasons this can be false; showing
+   * that message for all of them told people to redo a step they had already
+   * done.
+   */
+  function readOnlyExplanation(hasToken, authError, ref) {
+    if (!hasToken) {
+      return {
+        message: 'Add a personal access token in the extension options to post comments.',
+        action: 'addToken'
+      };
+    }
+    if (authError) {
+      return {
+        message: 'Token is saved but GitHub would not confirm the account: ' + authError,
+        action: 'options'
+      };
+    }
+    if (SHA_REF.test(ref)) {
+      return {
+        message: 'This is a commit SHA, not a branch. Open the file on a branch to comment.',
+        action: null
+      };
+    }
+    return {
+      message: 'Cannot write to this file with the saved token.',
+      action: 'options'
+    };
+  }
+
   let state = null;
   let selectionButton = null;
   let lastHref = '';
@@ -502,15 +535,7 @@
     if (!state || !root) return;
 
     if (!state.canWrite) {
-      if (!state.hasToken) {
-        state.error = 'Add a personal access token in the extension options to post comments.';
-      } else if (state.authError) {
-        state.error = 'Token is saved but GitHub would not confirm the account: ' + state.authError;
-      } else if (SHA_REF.test(state.location.ref)) {
-        state.error = 'This is a commit SHA, not a branch. Open the file on a branch to comment.';
-      } else {
-        state.error = 'Cannot write to this file with the saved token.';
-      }
+      state.error = readOnlyExplanation(state.hasToken, state.authError, state.location.ref).message;
       setPanelOpen(true, true);
       MDCPanel.render(state);
       return;
@@ -788,6 +813,10 @@
       }
     }
 
+    // Writing to a detached commit is not a thing; require a branch.
+    const canWrite = !!(tokenState.hasToken && author) && !SHA_REF.test(where.ref) && !!where.ref;
+    const readOnly = canWrite ? null : readOnlyExplanation(!!tokenState.hasToken, authError, where.ref);
+
     state = {
       location: where,
       sha: file.sha,
@@ -815,8 +844,11 @@
       authError: authError,
       failed: false,
       profiles: {},
-      // Writing to a detached commit is not a thing; require a branch.
-      canWrite: !!(tokenState.hasToken && author) && !SHA_REF.test(where.ref) && !!where.ref
+      canWrite: canWrite,
+      // Populated only when canWrite is false, so the banner can say why
+      // instead of always assuming a missing token.
+      readOnlyMessage: readOnly && readOnly.message,
+      readOnlyAction: readOnly && readOnly.action
     };
 
     findReanchorCandidates();
