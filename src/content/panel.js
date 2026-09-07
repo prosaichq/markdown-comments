@@ -314,6 +314,18 @@ const MDCPanel = (function () {
         return;
       }
 
+      // A commit SHA is not something Options can fix; the way out is the
+      // branch, so offer that here too rather than only in the quiet banner.
+      if (state.readOnlyLink) {
+        const branch = document.createElement('a');
+        branch.textContent = state.readOnlyLink.text;
+        branch.href = state.readOnlyLink.href;
+        branch.target = '_blank';
+        branch.rel = 'noopener noreferrer';
+        bannerEl.appendChild(branch);
+        return;
+      }
+
       if (handlers.onOpenOptions) {
         const options = document.createElement('a');
         options.textContent = 'Options';
@@ -350,6 +362,17 @@ const MDCPanel = (function () {
         link.addEventListener('click', function () {
           if (handlers.onOpenOptions) handlers.onOpenOptions();
         });
+        bannerEl.appendChild(link);
+      }
+
+      // Somewhere else to go, rather than an instruction to find it yourself.
+      if (state.readOnlyAction === 'link' && state.readOnlyLink) {
+        bannerEl.appendChild(document.createTextNode(' '));
+        const link = document.createElement('a');
+        link.textContent = state.readOnlyLink.text;
+        link.href = state.readOnlyLink.href;
+        link.target = '_blank';
+        link.rel = 'noopener noreferrer';
         bannerEl.appendChild(link);
       }
     }

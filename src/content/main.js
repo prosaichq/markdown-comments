@@ -20,7 +20,7 @@
    * that message for all of them told people to redo a step they had already
    * done.
    */
-  function readOnlyExplanation(hasToken, authError, ref) {
+  function readOnlyExplanation(hasToken, authError, ref, branchLink) {
     if (!hasToken) {
       return {
         message: 'Add a personal access token in the extension options to post comments.',
@@ -34,6 +34,16 @@
       };
     }
     if (SHA_REF.test(ref)) {
+      // Telling someone to go and find a branch is work they should not have
+      // to do: the branch under review is one link away, so offer it whenever
+      // one was found.
+      if (branchLink) {
+        return {
+          message: 'This is a commit SHA, not a branch. Comments belong on a branch.',
+          action: 'link',
+          link: branchLink
+        };
+      }
       return {
         message: 'This is a commit SHA, not a branch. Open the file on a branch to comment.',
         action: null
@@ -42,6 +52,67 @@
     return {
       message: 'Cannot write to this file with the saved token.',
       action: 'options'
+    };
+  }
+
+  /** Percent-encodes each segment but keeps the separators. */
+  function encodeSegments(value) {
+    return value.split('/').map(encodeURIComponent).join('/');
+  }
+
+  function blobURL(owner, repo, ref, path) {
+    return 'https://github.com/' + owner + '/' + repo + '/blob/' +
+           encodeSegments(ref) + '/' + encodeSegments(path);
+  }
+
+  /** True when the file is readable on that branch, so a link to it will work. */
+  async function fileIsOn(target, path) {
+    try {
+      await send({
+        type: 'getFile', owner: target.owner, repo: target.repo, path: path, ref: target.branch
+      });
+      return true;
+    } catch (error) {
+      return false;
+    }
+  }
+
+  /**
+   * Finds a branch showing this same file, so the "this is a commit SHA"
+   * banner can hand over a working link instead of an instruction. A branch
+   * carrying the commit comes first: a SHA URL usually arrives from a pull
+   * request, and the comment belongs on the branch under review rather than on
+   * whatever the default branch happens to say. The default branch is the last
+   * resort, and is named as a different version so it cannot be mistaken for
+   * the file on screen. No link at all beats one that 404s.
+   */
+  async function writableCopy(where) {
+    let target = null;
+    try {
+      target = await send({
+        type: 'branchForCommit', owner: where.owner, repo: where.repo, sha: where.ref
+      });
+    } catch (error) { /* fall through to the default branch */ }
+
+    if (target && target.branch && (target.sameContent || await fileIsOn(target, where.path))) {
+      return {
+        href: blobURL(target.owner, target.repo, target.branch, where.path),
+        text: 'Open on ' + target.branch
+      };
+    }
+
+    let file = null;
+    try {
+      file = await send({
+        type: 'getFile', owner: where.owner, repo: where.repo, path: where.path
+      });
+    } catch (error) {
+      return null; // deleted since, renamed, or the lookup failed; say nothing
+    }
+    if (!file || !file.ref) return null;
+    return {
+      href: blobURL(where.owner, where.repo, file.ref, where.path),
+      text: 'Open the current version on ' + file.ref
     };
   }
 
@@ -535,7 +606,9 @@
     if (!state || !root) return;
 
     if (!state.canWrite) {
-      state.error = readOnlyExplanation(state.hasToken, state.authError, state.location.ref).message;
+      state.error = readOnlyExplanation(
+        state.hasToken, state.authError, state.location.ref, state.readOnlyLink
+      ).message;
       setPanelOpen(true, true);
       MDCPanel.render(state);
       return;
@@ -815,7 +888,15 @@
 
     // Writing to a detached commit is not a thing; require a branch.
     const canWrite = !!(tokenState.hasToken && author) && !SHA_REF.test(where.ref) && !!where.ref;
-    const readOnly = canWrite ? null : readOnlyExplanation(!!tokenState.hasToken, authError, where.ref);
+
+    // Only worth a lookup when the SHA is the thing standing in the way: with
+    // no usable token, moving to a branch would change nothing.
+    const branchLink = !canWrite && tokenState.hasToken && author && SHA_REF.test(where.ref)
+      ? await writableCopy(where)
+      : null;
+    const readOnly = canWrite
+      ? null
+      : readOnlyExplanation(!!tokenState.hasToken, authError, where.ref, branchLink);
 
     state = {
       location: where,
@@ -848,7 +929,8 @@
       // Populated only when canWrite is false, so the banner can say why
       // instead of always assuming a missing token.
       readOnlyMessage: readOnly && readOnly.message,
-      readOnlyAction: readOnly && readOnly.action
+      readOnlyAction: readOnly && readOnly.action,
+      readOnlyLink: (readOnly && readOnly.link) || null
     };
 
     findReanchorCandidates();
